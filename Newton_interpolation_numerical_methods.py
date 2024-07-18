@@ -1,97 +1,94 @@
 import numpy as np
+import sympy as sp
 
-# Given data
-x = np.array([2, 4, 5, 8, 10])
-y = np.array([23, 93, 259, 596, 1071])
+# Define the datasets
+x1 = np.array([2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0])
+y1 = np.array([4.32, 4.83, 5.27, 5.47, 6.26, 6.79, 7.23])
 
-# Calculate the forward differences
+x2 = np.array([3, 4, 5, 6, 7, 8, 9])
+y2 = np.array([13, 21, 31, 43, 57, 73, 91])
+
 def calculate_forward_differences(y, stop_order):
     diffs = [y]
     while len(diffs[-1]) > 1 and len(diffs) <= stop_order:
         diffs.append(np.diff(diffs[-1]))
     return diffs
 
-# Check for consistent alternating signs
 def has_consistent_alternating_signs(diffs):
-    signs = np.sign(diffs)
-    return all(signs[i] * signs[i + 1] < 0 for i in range(len(signs) - 1))
+    return all(np.sign(diffs[i]) * np.sign(diffs[i + 1]) < 0 for i in range(len(diffs) - 1))
 
-# Determine the order at which to stop based on consistent alternating signs
-stop_order = next((i for i, diff in enumerate(calculate_forward_differences(y, len(y))) if has_consistent_alternating_signs(diff)), None)
+def find_stop_order(y):
+    forward_diffs = calculate_forward_differences(y, len(y))
+    for i, diff in enumerate(forward_diffs):
+        if np.all(diff == 0) or has_consistent_alternating_signs(diff):
+            return i
+    return len(forward_diffs) - 1
 
-# Calculate differences up to the stop order
-diffs = calculate_forward_differences(y, stop_order)
-
-# Find the index of the value with the highest absolute magnitude in the last forward difference
-error_index = np.argmax(np.abs(diffs[-1]))
-
-# Identify the range of x values that correspond to the error
-error_range = x[error_index:error_index+stop_order+1]
-
-# Print the differences, stop order, and error range
-for i, diff in enumerate(diffs):
-    print(f"Order {i} differences: {diff}")
-print(f"Stop order: {stop_order}")
-print(f"The range of x values that correspond to the highest value in the {stop_order}th forward difference is {error_range}.")
-
-# Compute the divided difference table
-def newton_divided_difference(x, y):
-    n = len(x)
+def newton_divided_difference(x, y, stop_order):
+    n = stop_order + 1
     divided_diff = np.zeros((n, n))
-    divided_diff[:, 0] = y
-
+    divided_diff[:, 0] = y[:n]
     for j in range(1, n):
         for i in range(n - j):
             divided_diff[i, j] = (divided_diff[i + 1, j - 1] - divided_diff[i, j - 1]) / (x[i + j] - x[i])
-    
-    return np.trunc(divided_diff)
+    return divided_diff
 
-divided_diff_table = newton_divided_difference(x, y)
-
-# Print the divided difference table
-print("Divided Difference Table:")
-print(divided_diff_table)
-
-# Generate the interpolation polynomial
-def newton_polynomial(x, divided_diff):
-    n = len(x)
-    coefficients = divided_diff[0, :]
-    
+def newton_polynomial(x, divided_diff, stop_order):
+    coefficients = divided_diff[0, :stop_order + 1]
     def polynomial(value):
-        result = coefficients[0]
-        term = 1.0
-        for i in range(1, n):
+        result, term = coefficients[0], 1.0
+        for i in range(1, stop_order + 1):
             term *= (value - x[i - 1])
             result += coefficients[i] * term
         return result
-    
     return polynomial
 
-polynomial = newton_polynomial(x, divided_diff_table)
+def get_polynomial_equation(coefficients, x, stop_order):
+    x_sym = sp.symbols('x')
+    equation, term = coefficients[0], 1
+    for i in range(1, stop_order + 1):
+        term *= (x_sym - x[i - 1])
+        equation += coefficients[i] * term
+    return sp.simplify(equation)
 
-# Example: Evaluate the polynomial at given values in the error range
-values_to_interpolate = error_range
-interpolated_values = [polynomial(val) for val in values_to_interpolate]
+def process_dataset(x, y):
+    stop_order = find_stop_order(y)
+    diffs = calculate_forward_differences(y, stop_order)
+    error_index = np.argmax(np.abs(diffs[-1]))
+    error_range = x[error_index:error_index + stop_order + 1]
+    divided_diff_table = newton_divided_difference(x, y, stop_order)
+    polynomial = newton_polynomial(x, divided_diff_table, stop_order)
+    interpolated_values = [polynomial(val) for val in error_range]
+    differences = np.abs(interpolated_values - y[error_index:error_index + stop_order + 1])
+    value_with_error = error_range[np.argmax(differences)]
+    equation = get_polynomial_equation(divided_diff_table[0, :stop_order + 1], x, stop_order)
+    return {
+        'diffs': diffs,
+        'stop_order': stop_order,
+        'error_range': error_range,
+        'divided_diff_table': divided_diff_table,
+        'interpolated_values': interpolated_values,
+        'differences': differences,
+        'value_with_error': value_with_error,
+        'equation': equation
+    }
 
-# Calculate the differences and find the value with the largest difference
-differences = np.abs(interpolated_values - y[error_index:error_index+stop_order+1])
-max_diff_index = np.argmax(differences)
-value_with_error = error_range[max_diff_index]
+def print_results(title, results):
+    print(f"{title}:")
+    for i, diff in enumerate(results['diffs']):
+        print(f"Order {i} differences: {diff}")
+    print(f"Stop order: {results['stop_order']}")
+    print(f"The range of x values that correspond to the highest value in the {results['stop_order']}th forward difference is {results['error_range']}.")
+    print("Divided Difference Table:")
+    print(results['divided_diff_table'])
+    print(f"Interpolated values at x = {results['error_range']}: {results['interpolated_values']}")
+    print(f"Differences between original and interpolated values: {results['differences']}")
+    print(f"The value with the largest difference is {results['value_with_error']}.")
+    print(f"Interpolation Polynomial Equation: P(x) = {results['equation']}\n")
 
-# Print the results
-print(f"\nInterpolated values at x = {values_to_interpolate}: {interpolated_values}")
-print(f"Differences between original and interpolated values: {differences}")
-print(f"The value with the largest difference is {value_with_error}.")
+results1 = process_dataset(x1, y1)
+results2 = process_dataset(x2, y2)
 
-# Get the equation of the interpolation
-def get_polynomial_equation(coefficients, x):
-    n = len(coefficients)
-    equation = f"{coefficients[0]}"
-    for i in range(1, n):
-        term = " * ".join([f"(x - {x[j]})" for j in range(i)])
-        equation += f" + {coefficients[i]} * {term}"
-    return equation
-
-coefficients = divided_diff_table[0, :]
-equation = get_polynomial_equation(coefficients, x)
-print(f"\nInterpolation Polynomial Equation: P(x) = {equation}")
+print_results("Results for Dataset 1", results1)
+print("="*50)
+print_results("Results for Dataset 2", results2)
